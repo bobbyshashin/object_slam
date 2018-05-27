@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
 	roscpp
 	sensor_msgs
 	nav_msgs
+  darknet_ros_msgs
 
 )
 

@@ -1,40 +1,44 @@
-#include <vector>
-//#include <darknet_ros_msgs/BoundingBoxes.h>
-//#include <darknet_ros_msgs/BoundingBox.h>
-
 #include "StereoSolver.h"
 
 using namespace cv;
 using namespace cv::xfeatures2d;
 
+sensor_msgs::Image StereoSolver::cvMatToROSMsg(const Mat image, const std::string frame_id, const std::string encoding){
+
+    cv_bridge::CvImage img;
+    img.image = image;
+    img.header.frame_id = frame_id;
+    img.encoding = encoding;
+    return *img.toImageMsg();
+}
+
+Mat StereoSolver::ROSMsgToCvMat(const sensor_msgs::Image msg){
+
+    cv_bridge::CvImagePtr cv_ptr;
+
+    try {
+      cv_ptr = cv_bridge::toCvCopy(msg, msg.encoding);
+    }
+    catch (cv_bridge::Exception& e){
+      ROS_ERROR("cv_bridge exception: %s", e.what());
+    }
+
+    return cv_ptr->image;
+
+}
+
+
 void StereoSolver::stitchImg(){
     if(!(img_left_flag_ && img_right_flag_))
         return;
-    
-    cv_bridge::CvImagePtr cv_ptr_left, cv_ptr_right;
-    try
-    {
-      cv_ptr_left = cv_bridge::toCvCopy(img_left_, sensor_msgs::image_encodings::BGR8);
-      cv_ptr_right = cv_bridge::toCvCopy(img_right_, sensor_msgs::image_encodings::BGR8);
-    }
-    catch (cv_bridge::Exception& e)
-    {
-      ROS_ERROR("cv_bridge exception: %s", e.what());
-      return;
-    }
 
-    Mat img_left, img_right, img_stitched;
+    Mat img_stitched;
+    hconcat(img_left_, img_right_, img_stitched);
 
-    img_left = cv_ptr_left->image;
-    img_right = cv_ptr_right->image;
+    batchImgPub_.publish(cvMatToROSMsg(img_stitched));
 
-    hconcat(img_left, img_right, img_stitched);
-    cv_bridge::CvImage img;
-    img.image = img_stitched;
-    img.encoding = sensor_msgs::image_encodings::BGR8;
-
-    batchImgPub_.publish(img.toImageMsg());
-
+    img_left_flag_ = false;
+    img_right_flag_ = false;
 
 }
 
@@ -42,20 +46,20 @@ void StereoSolver::publishBatchImg(){
 
     if(img_left_flag_ && img_right_flag_){
 
-        batchImgPub_.publish(img_left_);
-        batchImgPub_.publish(img_right_);
+        batchImgPub_.publish(cvMatToROSMsg(img_left_));
+        usleep(10*1000);
+        batchImgPub_.publish(cvMatToROSMsg(img_right_));
         img_left_flag_ = false;
         img_right_flag_ = false;
-        
-        std::cout << "Image batch published!" << std::endl;
+        //std::cout << "Image batch published!" << std::endl;
     }
     else
         std::cout << "No matching images!" << std::endl;
 }
 
 bool StereoSolver::featureMatching(){
-/*
-    if(!img_left.data || !img_right.data){
+
+    if(!img_left_.data || !img_right_.data){
         ROS_ERROR("Error reading images!");
         return false;
     }
@@ -64,8 +68,8 @@ bool StereoSolver::featureMatching(){
     Ptr<SIFT> detector = SIFT::create(minHessian);
 
     std::vector<KeyPoint> keypoints_left, keypoints_right;
-    detector->detect(img_left, keypoints_left);
-    detector->detect(img_right, keypoints_right);
+    detector->detect(img_left_, keypoints_left);
+    detector->detect(img_right_, keypoints_right);
 
     Mat img_keypoints_left, img_keypoints_right;
 
@@ -73,8 +77,8 @@ bool StereoSolver::featureMatching(){
 
     Mat descriptor_left, descriptor_right;
 
-    extractor->compute(img_left, keypoints_left, descriptor_left);
-    extractor->compute(img_right, keypoints_right, descriptor_right);
+    extractor->compute(img_left_, keypoints_left, descriptor_left);
+    extractor->compute(img_right_, keypoints_right, descriptor_right);
 
     FlannBasedMatcher matcher;
     std::vector<DMatch> matches;
@@ -104,7 +108,7 @@ bool StereoSolver::featureMatching(){
 
     Mat img_matches;
 
-    drawMatches(img_left, keypoints_left, img_right, keypoints_right, good_matches, img_matches, Scalar::all(-1), Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
+    drawMatches(img_left_, keypoints_left, img_right_, keypoints_right, good_matches, img_matches, Scalar::all(-1), Scalar::all(-1), std::vector<char>(), DrawMatchesFlags::NOT_DRAW_SINGLE_POINTS);
 
     imshow("Matched Keypoints", img_matches);
 
@@ -119,7 +123,34 @@ bool StereoSolver::featureMatching(){
     waitKey(10);
 
     return true;
-    */
+    
+
+
+
+}
+
+
+void StereoSolver::leftImgCallback(const sensor_msgs::ImageConstPtr& msg){
+
+    img_left_ = ROSMsgToCvMat(*msg);
+    img_left_flag_ = true;
+    //stitchImg();
+    publishBatchImg();
+
+}
+
+void StereoSolver::rightImgCallback(const sensor_msgs::ImageConstPtr& msg){
+
+    img_right_ = ROSMsgToCvMat(*msg);
+    img_right_flag_ = true;
+    //stitchImg();
+    publishBatchImg();
+
+}
+
+void StereoSolver::boundingBoxCallback(const darknet_ros_msgs::BoundingBoxes bboxes){
+
+
 
 
 
